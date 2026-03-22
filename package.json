@@ -4,11 +4,16 @@
   "description": "Indexer for LeaseFlow Protocol",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "jest"
   },
   "dependencies": {
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "jest": "^30.3.0",
+    "supertest": "^7.2.2"
   }
 }

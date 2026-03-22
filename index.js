@@ -14,6 +14,10 @@ app.get('/', (req, res) => {
   });
 });
 
-app.listen(port, () => {
-  console.log(`LeaseFlow Backend listening at http://localhost:${port}`);
-});
+if (require.main === module) {
+  app.listen(port, () => {
+    console.log(`LeaseFlow Backend listening at http://localhost:${port}`);
+  });
+}
+
+module.exports = app;
