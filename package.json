@@ -8,9 +8,15 @@
     "test": "jest"
   },
   "dependencies": {
+    "busboy": "^1.6.0",
     "algosdk": "^2.0.0",
     "cors": "^2.8.6",
+    "crypto-js": "^4.2.0",
     "dotenv": "^17.3.1",
+    "eciesjs": "^0.4.18",
+    "express": "^5.2.1",
+    "ipfs-http-client": "^60.0.1",
+    "multer": "^2.1.1"
     "express": "^5.2.1",
     "multer": "^2.1.1",
     "sharp": "^0.34.5"
