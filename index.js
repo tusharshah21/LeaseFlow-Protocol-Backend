@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const { getUSDCToFiatRates, getXLMToUSDCPath } = require('./services/priceFeedService');
 const { checkAndInitializeLease, getLeases, saveLeases } = require('./worker');
 const leaseRoutes = require('./src/routes/leaseRoutes');
 const ownerRoutes = require('./src/routes/ownerRoutes');
@@ -498,6 +499,55 @@ app.post('/sign-lease', async (req, res) => {
   await checkAndInitializeLease(leaseId);
   
   res.json({ message: `Lease ${leaseId} signed by ${role}.`, state: leases[leaseId] });
+});
+
+/**
+ * Get current USDC to Fiat exchange rates.
+ * Query params: currencies (comma-separated list of fiat currency codes, e.g., 'ngn,eur')
+ */
+app.get('/api/price-feed', async (req, res) => {
+  try {
+    const { currencies } = req.query;
+    const currencyList = currencies ? currencies.split(',') : ['ngn', 'eur', 'usd'];
+    const rates = await getUSDCToFiatRates(currencyList);
+    res.json({ 
+      success: true, 
+      rates,
+      base_currency: 'USDC' 
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
+});
+
+/**
+ * Calculate the best path for XLM to USDC payment.
+ * Query params: amount (destination USDC amount)
+ */
+app.get('/api/calculate-path-payment', async (req, res) => {
+  try {
+    const { amount } = req.query;
+    if (!amount) {
+      return res.status(400).json({ 
+        success: false, 
+        message: 'Destination amount is required.' 
+      });
+    }
+
+    const pathDetails = await getXLMToUSDCPath(amount);
+    res.json({ 
+      success: true, 
+      ...pathDetails 
+    });
+  } catch (error) {
+    res.status(500).json({ 
+      success: false, 
+      message: error.message 
+    });
+  }
 });
 
 // Asset metadata endpoints
