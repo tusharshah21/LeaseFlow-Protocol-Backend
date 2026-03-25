@@ -125,6 +125,29 @@ class AppDatabase {
 
       CREATE INDEX IF NOT EXISTS idx_payment_history_paid_at
         ON payment_history (paid_at);
+
+      CREATE TABLE IF NOT EXISTS utility_bills (
+        id                TEXT PRIMARY KEY,
+        lease_id          TEXT NOT NULL,
+        landlord_id       TEXT NOT NULL,
+        bill_amount       REAL NOT NULL,
+        tenant_share_amount REAL NOT NULL,
+        currency          TEXT NOT NULL,
+        billing_cycle     TEXT NOT NULL,
+        created_at        TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_utility_bills_lease_cycle
+        ON utility_bills (lease_id, billing_cycle);
+
+      CREATE TABLE IF NOT EXISTS upcoming_payments (
+        lease_id            TEXT PRIMARY KEY,
+        base_rent_amount    REAL NOT NULL,
+        utility_share_total REAL NOT NULL DEFAULT 0,
+        upcoming_total      REAL NOT NULL,
+        approval_status     TEXT NOT NULL DEFAULT 'pending',
+        updated_at          TEXT NOT NULL
+      );
     `);
   }
 
@@ -698,6 +721,136 @@ class AppDatabase {
       .get(tenantAccountId);
 
     return row ? normalizeLeaseRow(row) : null;
+  }
+
+  /**
+   * Persist an uploaded utility bill and the computed tenant share.
+   *
+   * @param {object} utilityBill Utility billing payload.
+   * @returns {object}
+   */
+  insertUtilityBill(utilityBill) {
+    const id = utilityBill.id || crypto.randomUUID();
+    const now = new Date().toISOString();
+
+    this.db
+      .prepare(
+        `INSERT INTO utility_bills (
+           id, lease_id, landlord_id, bill_amount, tenant_share_amount,
+           currency, billing_cycle, created_at
+         )
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        utilityBill.leaseId,
+        utilityBill.landlordId,
+        Number(utilityBill.billAmount),
+        Number(utilityBill.tenantShareAmount),
+        utilityBill.currency || 'USDC',
+        utilityBill.billingCycle,
+        now,
+      );
+
+    return this.db
+      .prepare(
+        `SELECT
+           id,
+           lease_id           AS leaseId,
+           landlord_id        AS landlordId,
+           bill_amount        AS billAmount,
+           tenant_share_amount AS tenantShareAmount,
+           currency,
+           billing_cycle      AS billingCycle,
+           created_at         AS createdAt
+         FROM utility_bills
+         WHERE id = ?`,
+      )
+      .get(id);
+  }
+
+  /**
+   * Return the total tenant utility share awaiting reconciliation for a lease.
+   *
+   * @param {string} leaseId Lease identifier.
+   * @returns {number}
+   */
+  getPendingUtilityShareTotalByLeaseId(leaseId) {
+    const row = this.db
+      .prepare(
+        `SELECT COALESCE(SUM(tenant_share_amount), 0) AS total
+         FROM utility_bills
+         WHERE lease_id = ?`,
+      )
+      .get(leaseId);
+
+    return Number(row?.total || 0);
+  }
+
+  /**
+   * Upsert the current upcoming payment total for a lease.
+   *
+   * @param {object} payload Upcoming payment totals.
+   * @returns {object|null}
+   */
+  upsertUpcomingPaymentTotal(payload) {
+    const baseRentAmount = Number(payload.baseRentAmount);
+    const utilityShareTotal = Number(payload.utilityShareTotal || 0);
+    const upcomingTotal = baseRentAmount + utilityShareTotal;
+    const now = new Date().toISOString();
+
+    this.db
+      .prepare(
+        `INSERT INTO upcoming_payments (
+           lease_id,
+           base_rent_amount,
+           utility_share_total,
+           upcoming_total,
+           approval_status,
+           updated_at
+         )
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(lease_id) DO UPDATE SET
+           base_rent_amount = excluded.base_rent_amount,
+           utility_share_total = excluded.utility_share_total,
+           upcoming_total = excluded.upcoming_total,
+           approval_status = excluded.approval_status,
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        payload.leaseId,
+        baseRentAmount,
+        utilityShareTotal,
+        upcomingTotal,
+        payload.approvalStatus || 'pending',
+        now,
+      );
+
+    return this.getUpcomingPaymentByLeaseId(payload.leaseId);
+  }
+
+  /**
+   * Fetch upcoming payment totals for a lease.
+   *
+   * @param {string} leaseId Lease identifier.
+   * @returns {object|null}
+   */
+  getUpcomingPaymentByLeaseId(leaseId) {
+    const row = this.db
+      .prepare(
+        `SELECT
+           lease_id            AS leaseId,
+           base_rent_amount    AS baseRentAmount,
+           utility_share_total AS utilityShareTotal,
+           upcoming_total      AS upcomingTotal,
+           approval_status     AS approvalStatus,
+           updated_at          AS updatedAt
+         FROM upcoming_payments
+         WHERE lease_id = ?`,
+      )
+      .get(leaseId);
+
+    return row ?? null;
   }
 }
 
