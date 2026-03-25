@@ -22,7 +22,9 @@ const {
   LeaseRenewalJob,
   startLeaseRenewalScheduler,
 } = require("./src/jobs/leaseRenewalJob");
-const { RentPaymentTrackerService } = require("./services/rentPaymentTrackerService");
+const {
+  RentPaymentTrackerService,
+} = require("./services/rentPaymentTrackerService");
 const { startPaymentTrackerJob } = require("./src/jobs/paymentTrackerJob");
 const { createPaymentRoutes } = require("./src/routes/paymentRoutes");
 const { LateFeeJob, startLateFeeScheduler } = require("./src/jobs/lateFeeJob");
@@ -193,13 +195,11 @@ function createApp(dependencies = {}) {
           actorId: req.actor.id,
           actorRole: req.actor.role,
         });
-        res
-          .status(200)
-          .json({
-            success: true,
-            data: result.proposal,
-            warning: result.warning,
-          });
+        res.status(200).json({
+          success: true,
+          data: result.proposal,
+          warning: result.warning,
+        });
       } catch (error) {
         res
           .status(error.statusCode || 500)
@@ -235,12 +235,10 @@ function createApp(dependencies = {}) {
       });
       res.status(201).json(proof);
     } catch (error) {
-      res
-        .status(500)
-        .json({
-          error: "CONDITION_PROOF_CREATE_FAILED",
-          message: error.message,
-        });
+      res.status(500).json({
+        error: "CONDITION_PROOF_CREATE_FAILED",
+        message: error.message,
+      });
     }
   });
 
@@ -252,14 +250,12 @@ function createApp(dependencies = {}) {
       service: depositGatekeeper,
     }),
     (req, res) => {
-      res
-        .status(200)
-        .json({
-          success: true,
-          message:
-            "Security deposit verified. Digital key generation is authorized.",
-          verification: req.securityDepositVerification,
-        });
+      res.status(200).json({
+        success: true,
+        message:
+          "Security deposit verified. Digital key generation is authorized.",
+        verification: req.securityDepositVerification,
+      });
     },
   );
 

@@ -601,7 +601,7 @@ class AppDatabase {
         payment.leaseId ?? null,
         payment.tenantAccountId,
         String(payment.amount),
-        payment.assetCode || 'XLM',
+        payment.assetCode || "XLM",
         payment.assetIssuer ?? null,
         payment.transactionHash,
         payment.paidAt,
