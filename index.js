@@ -123,6 +123,7 @@ function createApp(dependencies = {}) {
   app.use('/api/kyc', kycRoutes);
   app.use('/api/sanctions', sanctionsRoutes);
   app.use('/api/eviction-notices', evictionNoticeRoutes);
+  app.use('/api', createPaymentRoutes(database));
 
   // --- Lease Renewal Routes ---
   app.get('/renewal-proposals/:proposalId', requireActorAuth(actorAuthService), (req, res) => {
