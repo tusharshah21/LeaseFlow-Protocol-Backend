@@ -220,6 +220,360 @@ class AppDatabase {
       CREATE INDEX IF NOT EXISTS idx_sanctions_cache_address ON sanctions_cache(address);
       CREATE INDEX IF NOT EXISTS idx_sanctions_cache_source ON sanctions_cache(source);
       CREATE INDEX IF NOT EXISTS idx_sanctions_cache_expires_at ON sanctions_cache(expires_at);
+
+      -- Vendor management tables (Task 1: Vendor Role)
+      CREATE TABLE IF NOT EXISTS vendors (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL UNIQUE,
+        phone TEXT,
+        company_name TEXT,
+        license_number TEXT,
+        specialties TEXT,
+        kyc_status TEXT DEFAULT 'pending' CHECK (kyc_status IN ('pending', 'verified', 'rejected')),
+        stellar_account_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS maintenance_tickets (
+        id TEXT PRIMARY KEY,
+        lease_id TEXT NOT NULL,
+        vendor_id TEXT,
+        landlord_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        category TEXT NOT NULL,
+        priority TEXT NOT NULL DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'emergency')),
+        status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'in_progress', 'resolved', 'closed', 'disputed')),
+        photos TEXT,
+        repair_photos TEXT,
+        notes TEXT,
+        tenant_notes TEXT,
+        opened_at TEXT NOT NULL,
+        in_progress_at TEXT,
+        resolved_at TEXT,
+        closed_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (lease_id) REFERENCES leases(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS vendor_access_grants (
+        id TEXT PRIMARY KEY,
+        vendor_id TEXT NOT NULL,
+        lease_id TEXT NOT NULL,
+        maintenance_ticket_id TEXT NOT NULL,
+        granted_by TEXT NOT NULL,
+        access_type TEXT NOT NULL DEFAULT 'maintenance_log' CHECK (access_type IN ('maintenance_log', 'tenant_contact', 'property_access')),
+        permissions TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        revoked_at TEXT,
+        revoke_reason TEXT,
+        accessed_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (vendor_id) REFERENCES vendors(id),
+        FOREIGN KEY (lease_id) REFERENCES leases(id),
+        FOREIGN KEY (maintenance_ticket_id) REFERENCES maintenance_tickets(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS vendor_access_logs (
+        id TEXT PRIMARY KEY,
+        access_grant_id TEXT NOT NULL,
+        vendor_id TEXT NOT NULL,
+        lease_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        resource_accessed TEXT,
+        ip_address TEXT,
+        user_agent TEXT,
+        accessed_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (access_grant_id) REFERENCES vendor_access_grants(id),
+        FOREIGN KEY (vendor_id) REFERENCES vendors(id),
+        FOREIGN KEY (lease_id) REFERENCES leases(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_maintenance_tickets_lease_id ON maintenance_tickets(lease_id);
+      CREATE INDEX IF NOT EXISTS idx_maintenance_tickets_vendor_id ON maintenance_tickets(vendor_id);
+      CREATE INDEX IF NOT EXISTS idx_maintenance_tickets_status ON maintenance_tickets(status);
+      CREATE INDEX IF NOT EXISTS idx_vendor_access_grants_vendor_id ON vendor_access_grants(vendor_id);
+      CREATE INDEX IF NOT EXISTS idx_vendor_access_grants_lease_id ON vendor_access_grants(lease_id);
+      CREATE INDEX IF NOT EXISTS idx_vendor_access_grants_expires_at ON vendor_access_grants(expires_at);
+      CREATE INDEX IF NOT EXISTS idx_vendor_access_logs_access_grant_id ON vendor_access_logs(access_grant_id);
+      CREATE INDEX IF NOT EXISTS idx_vendor_access_logs_vendor_id ON vendor_access_logs(vendor_id);
+      CREATE INDEX IF NOT EXISTS idx_vendors_kyc_status ON vendors(kyc_status);
+
+      ALTER TABLE leases ADD COLUMN IF NOT EXISTS has_active_maintenance INTEGER DEFAULT 0;
+
+      -- Smart lock integration tables (Task 2: IoT Smart Lock Gateway)
+      CREATE TABLE IF NOT EXISTS smart_locks (
+        id TEXT PRIMARY KEY,
+        lease_id TEXT NOT NULL,
+        lock_provider TEXT NOT NULL CHECK (lock_provider IN ('august', 'yale', 'schlage', 'other')),
+        device_id TEXT NOT NULL UNIQUE,
+        device_name TEXT,
+        access_token TEXT,
+        refresh_token TEXT,
+        token_expires_at TEXT,
+        pairing_status TEXT DEFAULT 'pending' CHECK (pairing_status IN ('pending', 'paired', 'error', 'unpaired')),
+        last_sync_at TEXT,
+        firmware_version TEXT,
+        battery_level INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (lease_id) REFERENCES leases(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS digital_keys (
+        id TEXT PRIMARY KEY,
+        lease_id TEXT NOT NULL,
+        smart_lock_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        tenant_account_id TEXT NOT NULL,
+        key_type TEXT NOT NULL DEFAULT 'bluetooth' CHECK (key_type IN ('bluetooth', 'wifi', 'cloud')),
+        key_data TEXT,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked', 'expired')),
+        valid_from TEXT NOT NULL,
+        valid_until TEXT NOT NULL,
+        revoked_at TEXT,
+        revoke_reason TEXT,
+        last_used_at TEXT,
+        usage_count INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (lease_id) REFERENCES leases(id),
+        FOREIGN KEY (smart_lock_id) REFERENCES smart_locks(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS key_usage_logs (
+        id TEXT PRIMARY KEY,
+        digital_key_id TEXT NOT NULL,
+        smart_lock_id TEXT NOT NULL,
+        lease_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        action TEXT NOT NULL CHECK (action IN ('unlock', 'lock', 'access_granted', 'access_denied', 'key_revoked')),
+        result TEXT NOT NULL CHECK (result IN ('success', 'failure', 'denied')),
+        failure_reason TEXT,
+        ip_address TEXT,
+        location_data TEXT,
+        metadata TEXT,
+        performed_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (digital_key_id) REFERENCES digital_keys(id),
+        FOREIGN KEY (smart_lock_id) REFERENCES smart_locks(id),
+        FOREIGN KEY (lease_id) REFERENCES leases(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS lease_enforcement_checks (
+        id TEXT PRIMARY KEY,
+        lease_id TEXT NOT NULL,
+        check_type TEXT NOT NULL CHECK (check_type IN ('rent_payment', 'lease_active', 'lease_expired', 'breach_detected')),
+        soroban_contract_status TEXT,
+        rent_current INTEGER,
+        enforcement_action TEXT,
+        check_result TEXT NOT NULL CHECK (check_result IN ('pass', 'fail', 'warning')),
+        details TEXT,
+        checked_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (lease_id) REFERENCES leases(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_smart_locks_lease_id ON smart_locks(lease_id);
+      CREATE INDEX IF NOT EXISTS idx_smart_locks_device_id ON smart_locks(device_id);
+      CREATE INDEX IF NOT EXISTS idx_digital_keys_lease_id ON digital_keys(lease_id);
+      CREATE INDEX IF NOT EXISTS idx_digital_keys_tenant_id ON digital_keys(tenant_id);
+      CREATE INDEX IF NOT EXISTS idx_digital_keys_status ON digital_keys(status);
+      CREATE INDEX IF NOT EXISTS idx_digital_keys_valid_until ON digital_keys(valid_until);
+      CREATE INDEX IF NOT EXISTS idx_key_usage_logs_digital_key_id ON key_usage_logs(digital_key_id);
+      CREATE INDEX IF NOT EXISTS idx_key_usage_logs_smart_lock_id ON key_usage_logs(smart_lock_id);
+      CREATE INDEX IF NOT EXISTS idx_lease_enforcement_checks_lease_id ON lease_enforcement_checks(lease_id);
+      CREATE INDEX IF NOT EXISTS idx_lease_enforcement_checks_checked_at ON lease_enforcement_checks(checked_at);
+
+      -- Rent escrow tables (Task 3: Maintenance Dispute Escrow)
+      CREATE TABLE IF NOT EXISTS rent_escrows (
+        id TEXT PRIMARY KEY,
+        lease_id TEXT NOT NULL,
+        maintenance_ticket_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        landlord_id TEXT NOT NULL,
+        disputed_amount TEXT NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'XLM',
+        escrow_status TEXT NOT NULL DEFAULT 'active' CHECK (escrow_status IN ('active', 'released_to_landlord', 'returned_to_tenant', 'split', 'cancelled')),
+        escrow_account_id TEXT,
+        reason TEXT NOT NULL,
+        evidence TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (lease_id) REFERENCES leases(id),
+        FOREIGN KEY (maintenance_ticket_id) REFERENCES maintenance_tickets(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS escrow_transactions (
+        id TEXT PRIMARY KEY,
+        escrow_id TEXT NOT NULL,
+        transaction_type TEXT NOT NULL CHECK (transaction_type IN ('deposit', 'release', 'return', 'split', 'refund')),
+        amount TEXT NOT NULL,
+        currency TEXT NOT NULL,
+        transaction_hash TEXT,
+        stellar_operation_id TEXT,
+        recipient_id TEXT,
+        recipient_account_id TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed')),
+        failure_reason TEXT,
+        metadata TEXT,
+        processed_at TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (escrow_id) REFERENCES rent_escrows(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS repair_verifications (
+        id TEXT PRIMARY KEY,
+        maintenance_ticket_id TEXT NOT NULL,
+        escrow_id TEXT,
+        repair_photos_before TEXT,
+        repair_photos_after TEXT,
+        repair_description TEXT,
+        tenant_confirmation_status TEXT DEFAULT 'pending' CHECK (tenant_confirmation_status IN ('pending', 'confirmed', 'rejected', 'timeout')),
+        tenant_feedback TEXT,
+        tenant_confirmed_at TEXT,
+        tenant_rejected_at TEXT,
+        auto_release_triggered INTEGER DEFAULT 0,
+        verifier_notes TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (maintenance_ticket_id) REFERENCES maintenance_tickets(id),
+        FOREIGN KEY (escrow_id) REFERENCES rent_escrows(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS escrow_release_rules (
+        id TEXT PRIMARY KEY,
+        lease_id TEXT,
+        rule_type TEXT NOT NULL CHECK (rule_type IN ('auto_release_days', 'require_verification', 'split_percentage')),
+        rule_value TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (lease_id) REFERENCES leases(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_rent_escrows_lease_id ON rent_escrows(lease_id);
+      CREATE INDEX IF NOT EXISTS idx_rent_escrows_maintenance_ticket_id ON rent_escrows(maintenance_ticket_id);
+      CREATE INDEX IF NOT EXISTS idx_rent_escrows_status ON rent_escrows(escrow_status);
+      CREATE INDEX IF NOT EXISTS idx_escrow_transactions_escrow_id ON escrow_transactions(escrow_id);
+      CREATE INDEX IF NOT EXISTS idx_escrow_transactions_status ON escrow_transactions(status);
+      CREATE INDEX IF NOT EXISTS idx_repair_verifications_maintenance_ticket_id ON repair_verifications(maintenance_ticket_id);
+      CREATE INDEX IF NOT EXISTS idx_repair_verifications_tenant_status ON repair_verifications(tenant_confirmation_status);
+      CREATE INDEX IF NOT EXISTS idx_escrow_release_rules_lease_id ON escrow_release_rules(lease_id);
+
+      -- IoT utility monitoring tables (Task 4: Utility Monitoring Analytics)
+      CREATE TABLE IF NOT EXISTS utility_meters (
+        id TEXT PRIMARY KEY,
+        lease_id TEXT NOT NULL,
+        meter_type TEXT NOT NULL CHECK (meter_type IN ('water', 'electricity', 'gas', 'internet', 'other')),
+        meter_id TEXT NOT NULL UNIQUE,
+        meter_name TEXT,
+        provider TEXT,
+        unit_of_measurement TEXT NOT NULL DEFAULT 'units',
+        location_description TEXT,
+        installation_date TEXT,
+        last_reading_date TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (lease_id) REFERENCES leases(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS meter_readings (
+        id TEXT PRIMARY KEY,
+        utility_meter_id TEXT NOT NULL,
+        lease_id TEXT NOT NULL,
+        reading_value REAL NOT NULL,
+        consumption_value REAL,
+        reading_timestamp TEXT NOT NULL,
+        reading_source TEXT NOT NULL CHECK (reading_source IN ('iot_auto', 'manual_entry', 'estimated')),
+        quality_score REAL,
+        is_anomaly INTEGER DEFAULT 0,
+        anomaly_reason TEXT,
+        metadata TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (utility_meter_id) REFERENCES utility_meters(id),
+        FOREIGN KEY (lease_id) REFERENCES leases(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS utility_alerts (
+        id TEXT PRIMARY KEY,
+        utility_meter_id TEXT NOT NULL,
+        lease_id TEXT NOT NULL,
+        alert_type TEXT NOT NULL CHECK (alert_type IN ('high_consumption', 'leak_detected', 'no_data', 'meter_offline', 'spike_detected')),
+        severity TEXT NOT NULL DEFAULT 'medium' CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        trigger_value REAL,
+        threshold_value REAL,
+        standard_deviations REAL,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'acknowledged', 'resolved', 'false_positive')),
+        acknowledged_by TEXT,
+        acknowledged_at TEXT,
+        resolved_by TEXT,
+        resolved_at TEXT,
+        resolution_notes TEXT,
+        notifications_sent TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (utility_meter_id) REFERENCES utility_meters(id),
+        FOREIGN KEY (lease_id) REFERENCES leases(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS consumption_baselines (
+        id TEXT PRIMARY KEY,
+        utility_meter_id TEXT NOT NULL,
+        lease_id TEXT NOT NULL,
+        baseline_period TEXT NOT NULL CHECK (baseline_period IN ('daily', 'weekly', 'monthly', 'seasonal')),
+        avg_consumption REAL NOT NULL,
+        std_deviation REAL NOT NULL,
+        min_consumption REAL,
+        max_consumption REAL,
+        sample_size INTEGER,
+        calculation_method TEXT DEFAULT 'rolling_average',
+        last_calculated_at TEXT NOT NULL,
+        valid_from TEXT NOT NULL,
+        valid_until TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (utility_meter_id) REFERENCES utility_meters(id),
+        FOREIGN KEY (lease_id) REFERENCES leases(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS alert_rules (
+        id TEXT PRIMARY KEY,
+        lease_id TEXT,
+        utility_meter_id TEXT,
+        rule_type TEXT NOT NULL CHECK (rule_type IN ('std_deviation_threshold', 'absolute_threshold', 'percentage_change', 'no_data_timeout')),
+        rule_config TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        notification_channels TEXT,
+        notify_tenant INTEGER DEFAULT 1,
+        notify_landlord INTEGER DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (lease_id) REFERENCES leases(id),
+        FOREIGN KEY (utility_meter_id) REFERENCES utility_meters(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_utility_meters_lease_id ON utility_meters(lease_id);
+      CREATE INDEX IF NOT EXISTS idx_utility_meters_meter_type ON utility_meters(meter_type);
+      CREATE INDEX IF NOT EXISTS idx_meter_readings_meter_id ON meter_readings(utility_meter_id);
+      CREATE INDEX IF NOT EXISTS idx_meter_readings_lease_id ON meter_readings(lease_id);
+      CREATE INDEX IF NOT EXISTS idx_meter_readings_timestamp ON meter_readings(reading_timestamp DESC);
+      CREATE INDEX IF NOT EXISTS idx_meter_readings_is_anomaly ON meter_readings(is_anomaly);
+      CREATE INDEX IF NOT EXISTS idx_utility_alerts_meter_id ON utility_alerts(utility_meter_id);
+      CREATE INDEX IF NOT EXISTS idx_utility_alerts_lease_id ON utility_alerts(lease_id);
+      CREATE INDEX IF NOT EXISTS idx_utility_alerts_status ON utility_alerts(status);
+      CREATE INDEX IF NOT EXISTS idx_utility_alerts_created_at ON utility_alerts(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_consumption_baselines_meter_id ON consumption_baselines(utility_meter_id);
+      CREATE INDEX IF NOT EXISTS idx_alert_rules_lease_id ON alert_rules(lease_id);
+      CREATE INDEX IF NOT EXISTS idx_alert_rules_meter_id ON alert_rules(utility_meter_id);
     `);
   }
 
