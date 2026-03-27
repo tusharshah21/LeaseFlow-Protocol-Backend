@@ -466,6 +466,114 @@ class AppDatabase {
       CREATE INDEX IF NOT EXISTS idx_repair_verifications_maintenance_ticket_id ON repair_verifications(maintenance_ticket_id);
       CREATE INDEX IF NOT EXISTS idx_repair_verifications_tenant_status ON repair_verifications(tenant_confirmation_status);
       CREATE INDEX IF NOT EXISTS idx_escrow_release_rules_lease_id ON escrow_release_rules(lease_id);
+
+      -- IoT utility monitoring tables (Task 4: Utility Monitoring Analytics)
+      CREATE TABLE IF NOT EXISTS utility_meters (
+        id TEXT PRIMARY KEY,
+        lease_id TEXT NOT NULL,
+        meter_type TEXT NOT NULL CHECK (meter_type IN ('water', 'electricity', 'gas', 'internet', 'other')),
+        meter_id TEXT NOT NULL UNIQUE,
+        meter_name TEXT,
+        provider TEXT,
+        unit_of_measurement TEXT NOT NULL DEFAULT 'units',
+        location_description TEXT,
+        installation_date TEXT,
+        last_reading_date TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (lease_id) REFERENCES leases(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS meter_readings (
+        id TEXT PRIMARY KEY,
+        utility_meter_id TEXT NOT NULL,
+        lease_id TEXT NOT NULL,
+        reading_value REAL NOT NULL,
+        consumption_value REAL,
+        reading_timestamp TEXT NOT NULL,
+        reading_source TEXT NOT NULL CHECK (reading_source IN ('iot_auto', 'manual_entry', 'estimated')),
+        quality_score REAL,
+        is_anomaly INTEGER DEFAULT 0,
+        anomaly_reason TEXT,
+        metadata TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (utility_meter_id) REFERENCES utility_meters(id),
+        FOREIGN KEY (lease_id) REFERENCES leases(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS utility_alerts (
+        id TEXT PRIMARY KEY,
+        utility_meter_id TEXT NOT NULL,
+        lease_id TEXT NOT NULL,
+        alert_type TEXT NOT NULL CHECK (alert_type IN ('high_consumption', 'leak_detected', 'no_data', 'meter_offline', 'spike_detected')),
+        severity TEXT NOT NULL DEFAULT 'medium' CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        trigger_value REAL,
+        threshold_value REAL,
+        standard_deviations REAL,
+        status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'acknowledged', 'resolved', 'false_positive')),
+        acknowledged_by TEXT,
+        acknowledged_at TEXT,
+        resolved_by TEXT,
+        resolved_at TEXT,
+        resolution_notes TEXT,
+        notifications_sent TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (utility_meter_id) REFERENCES utility_meters(id),
+        FOREIGN KEY (lease_id) REFERENCES leases(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS consumption_baselines (
+        id TEXT PRIMARY KEY,
+        utility_meter_id TEXT NOT NULL,
+        lease_id TEXT NOT NULL,
+        baseline_period TEXT NOT NULL CHECK (baseline_period IN ('daily', 'weekly', 'monthly', 'seasonal')),
+        avg_consumption REAL NOT NULL,
+        std_deviation REAL NOT NULL,
+        min_consumption REAL,
+        max_consumption REAL,
+        sample_size INTEGER,
+        calculation_method TEXT DEFAULT 'rolling_average',
+        last_calculated_at TEXT NOT NULL,
+        valid_from TEXT NOT NULL,
+        valid_until TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (utility_meter_id) REFERENCES utility_meters(id),
+        FOREIGN KEY (lease_id) REFERENCES leases(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS alert_rules (
+        id TEXT PRIMARY KEY,
+        lease_id TEXT,
+        utility_meter_id TEXT,
+        rule_type TEXT NOT NULL CHECK (rule_type IN ('std_deviation_threshold', 'absolute_threshold', 'percentage_change', 'no_data_timeout')),
+        rule_config TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        notification_channels TEXT,
+        notify_tenant INTEGER DEFAULT 1,
+        notify_landlord INTEGER DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (lease_id) REFERENCES leases(id),
+        FOREIGN KEY (utility_meter_id) REFERENCES utility_meters(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_utility_meters_lease_id ON utility_meters(lease_id);
+      CREATE INDEX IF NOT EXISTS idx_utility_meters_meter_type ON utility_meters(meter_type);
+      CREATE INDEX IF NOT EXISTS idx_meter_readings_meter_id ON meter_readings(utility_meter_id);
+      CREATE INDEX IF NOT EXISTS idx_meter_readings_lease_id ON meter_readings(lease_id);
+      CREATE INDEX IF NOT EXISTS idx_meter_readings_timestamp ON meter_readings(reading_timestamp DESC);
+      CREATE INDEX IF NOT EXISTS idx_meter_readings_is_anomaly ON meter_readings(is_anomaly);
+      CREATE INDEX IF NOT EXISTS idx_utility_alerts_meter_id ON utility_alerts(utility_meter_id);
+      CREATE INDEX IF NOT EXISTS idx_utility_alerts_lease_id ON utility_alerts(lease_id);
+      CREATE INDEX IF NOT EXISTS idx_utility_alerts_status ON utility_alerts(status);
+      CREATE INDEX IF NOT EXISTS idx_utility_alerts_created_at ON utility_alerts(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_consumption_baselines_meter_id ON consumption_baselines(utility_meter_id);
+      CREATE INDEX IF NOT EXISTS idx_alert_rules_lease_id ON alert_rules(lease_id);
+      CREATE INDEX IF NOT EXISTS idx_alert_rules_meter_id ON alert_rules(utility_meter_id);
     `);
   }
 
