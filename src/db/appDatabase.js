@@ -390,6 +390,82 @@ class AppDatabase {
       CREATE INDEX IF NOT EXISTS idx_key_usage_logs_smart_lock_id ON key_usage_logs(smart_lock_id);
       CREATE INDEX IF NOT EXISTS idx_lease_enforcement_checks_lease_id ON lease_enforcement_checks(lease_id);
       CREATE INDEX IF NOT EXISTS idx_lease_enforcement_checks_checked_at ON lease_enforcement_checks(checked_at);
+
+      -- Rent escrow tables (Task 3: Maintenance Dispute Escrow)
+      CREATE TABLE IF NOT EXISTS rent_escrows (
+        id TEXT PRIMARY KEY,
+        lease_id TEXT NOT NULL,
+        maintenance_ticket_id TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        landlord_id TEXT NOT NULL,
+        disputed_amount TEXT NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'XLM',
+        escrow_status TEXT NOT NULL DEFAULT 'active' CHECK (escrow_status IN ('active', 'released_to_landlord', 'returned_to_tenant', 'split', 'cancelled')),
+        escrow_account_id TEXT,
+        reason TEXT NOT NULL,
+        evidence TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (lease_id) REFERENCES leases(id),
+        FOREIGN KEY (maintenance_ticket_id) REFERENCES maintenance_tickets(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS escrow_transactions (
+        id TEXT PRIMARY KEY,
+        escrow_id TEXT NOT NULL,
+        transaction_type TEXT NOT NULL CHECK (transaction_type IN ('deposit', 'release', 'return', 'split', 'refund')),
+        amount TEXT NOT NULL,
+        currency TEXT NOT NULL,
+        transaction_hash TEXT,
+        stellar_operation_id TEXT,
+        recipient_id TEXT,
+        recipient_account_id TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed')),
+        failure_reason TEXT,
+        metadata TEXT,
+        processed_at TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (escrow_id) REFERENCES rent_escrows(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS repair_verifications (
+        id TEXT PRIMARY KEY,
+        maintenance_ticket_id TEXT NOT NULL,
+        escrow_id TEXT,
+        repair_photos_before TEXT,
+        repair_photos_after TEXT,
+        repair_description TEXT,
+        tenant_confirmation_status TEXT DEFAULT 'pending' CHECK (tenant_confirmation_status IN ('pending', 'confirmed', 'rejected', 'timeout')),
+        tenant_feedback TEXT,
+        tenant_confirmed_at TEXT,
+        tenant_rejected_at TEXT,
+        auto_release_triggered INTEGER DEFAULT 0,
+        verifier_notes TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (maintenance_ticket_id) REFERENCES maintenance_tickets(id),
+        FOREIGN KEY (escrow_id) REFERENCES rent_escrows(id)
+      );
+
+      CREATE TABLE IF NOT EXISTS escrow_release_rules (
+        id TEXT PRIMARY KEY,
+        lease_id TEXT,
+        rule_type TEXT NOT NULL CHECK (rule_type IN ('auto_release_days', 'require_verification', 'split_percentage')),
+        rule_value TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (lease_id) REFERENCES leases(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_rent_escrows_lease_id ON rent_escrows(lease_id);
+      CREATE INDEX IF NOT EXISTS idx_rent_escrows_maintenance_ticket_id ON rent_escrows(maintenance_ticket_id);
+      CREATE INDEX IF NOT EXISTS idx_rent_escrows_status ON rent_escrows(escrow_status);
+      CREATE INDEX IF NOT EXISTS idx_escrow_transactions_escrow_id ON escrow_transactions(escrow_id);
+      CREATE INDEX IF NOT EXISTS idx_escrow_transactions_status ON escrow_transactions(status);
+      CREATE INDEX IF NOT EXISTS idx_repair_verifications_maintenance_ticket_id ON repair_verifications(maintenance_ticket_id);
+      CREATE INDEX IF NOT EXISTS idx_repair_verifications_tenant_status ON repair_verifications(tenant_confirmation_status);
+      CREATE INDEX IF NOT EXISTS idx_escrow_release_rules_lease_id ON escrow_release_rules(lease_id);
     `);
   }
 

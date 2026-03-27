@@ -41,6 +41,7 @@ const sanctionsRoutes = require('./src/routes/sanctionsRoutes');
 const evictionNoticeRoutes = require('./src/routes/evictionNoticeRoutes');
 const vendorRoutes = require('./src/routes/vendorRoutes');
 const smartLockRoutes = require('./src/routes/smartLockRoutes');
+const rentEscrowRoutes = require('./src/routes/rentEscrowRoutes');
 
 /**
  * Build authentication middleware for landlords and tenants.
@@ -127,6 +128,7 @@ function createApp(dependencies = {}) {
   app.use('/api/eviction-notices', evictionNoticeRoutes);
   app.use('/api/vendors', vendorRoutes);
   app.use('/api/smartlocks', smartLockRoutes);
+  app.use('/api/escrow', rentEscrowRoutes);
 
   // --- Lease Renewal Routes ---
   app.get('/renewal-proposals/:proposalId', requireActorAuth(actorAuthService), (req, res) => {
